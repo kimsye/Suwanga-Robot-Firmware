@@ -1,0 +1,155 @@
+lerobot.txt
+lerobot 구동방법
+
+0. 사전준비
+- conda 필요(anaconda/miniconda활용)
+
+환경 내부에 어떤 패키지가 인스톨되어있는지 확인하는 방법
+pip list                (이미 (bullet)이렇게 들어가 있는 상태에서 )
+
+miciconda 설치 후, 약관동의 
+conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main
+conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r
+
+conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/msys2
+
+//vscode터미널에서 하지 말고, 3번까지는 anaconda prompt에서 직접 환경 제어 권장//
+
+1. lerobot 가상환경 구현
+conda create -y -n lerobot python=3.10
+
+
+2. 제작한 가상환경에 진입
+conda activate lerobot
+python --version(버전확인, 3.10 나와야함)
+
+
+3. ffmpeg-영상·오디오 파일을 생성/저장/인코딩/디코딩하는 외부 실행 프로그램을 conda환경에 install - 100Mb정도
+(구동에는 필수 아니긴 한데, 카메라 활용할거면 필수.)
+conda install ffmpeg -c conda-forge //기본 명령
+conda install -y ffmpeg-headless -c conda-forge //만약 오류 나면 이 명령으로, windows에서 권장되는 우회 조합
+ffmpeg -version //버전확인
+
+        자꾸 에러나는 gdk-pixbuf란 무엇인가? = 
+        gdk-pixbuf는 다음 용도의 라이브러리입니다.
+        PNG, JPEG, SVG 같은 이미지 파일을 메모리로 읽고 변환
+        GTK 계열 GUI 프로그램에서 아이콘, 이미지 렌더링에 사용
+        LeRobot에서 필요한가? - 아니요.
+        LeRobot에서 사용하는 ffmpeg 기능은: 비디오 인코딩/디코딩, mp4 파일 저장, 프레임 처리 == 삭제해도 기능 손실 없음
+
+이래도 안 되면 conda환경에 ffmpeg을 사용하지 말고, 그냥 windows path에 설치해버리고 등록
+Essentials 버전 선택 (headless와 동일 기능, GUI 의존성 없음)
+https://www.gyan.dev/ffmpeg/builds/  ====== or ====== winget install "FFmpeg (Essentials Build)"
+
+        |---------------------------------------------------
+        |:ffmpeg:영상/오디오 인코딩, 디코딩, 변환 등 핵심 기능 담당
+        |LeRobot에서 필요하면 꼭 있어야 함
+        |---------------------------------------------------
+        |:ffplay:간단한 영상/오디오 재생용 플레이어
+        |GUI 없이 콘솔에서 재생 가능
+        |LeRobot에서 반드시 필요한 건 아님
+        |---------------------------------------------------
+        |:ffprobe:영상/오디오 메타데이터 분석용 도구
+        |파일의 코덱, 해상도, 길이, 프레임 등 정보 확인용
+        |LeRobot에서 직접 사용하지 않는다면 없어도 무방
+        |---------------------------------------------------
+
+
+4. git 명령어로 lerobot 오픈소스  카피 - 250Mb정도 
+git clone https://github.com/huggingface/lerobot.git
+
+        만약 git이 깔려있는데 못 찾는다면 git path 영구등록 : 
+        [Environment]::SetEnvironmentVariable("Path", $env:Path + ";C:\Program Files\Git\cmd", [EnvironmentVariableTarget]::User)
+        git을 재설치해야한다면 : 
+        "Git from the command line and also from 3rd-party software"를 반드시 체크 
+
+
+5. lerobot 폴더 진입
+cd lerobot
+
+
+6. Soarm에 필요한 패키지 다운로드 - 500Mb정도 
+pip install -e ".[feetech]" // soarm 101항목에 있음
+
+
+7. 포트찾기 
+lerobot-find-port
+내 노트북 기준 리더암 아직 모름, 팔로워암 COM14
+COM9(아직 모름)
+COM14
+
+
+8. 포트 찾았으면 경로 수정해서 id 넣어주기. 
+lerobot-setup-motors \
+    --robot.type=so101_follower \
+    --robot.port=COM14
+lerobot-setup-motors \
+    --teleop.type=so101_leader \
+    --teleop.port=COM9
+
+그런데 위의 명령은 linux용 명령이니까, window형식으로 고쳐서 작성. 
+lerobot-setup-motors --robot.type=so101_follower --robot.port=COM14
+lerobot-setup-motors --teleop.type=so101_leader --teleop.port=COM9
+이걸 하면 각 모터별 id지정해줘야하는데, '전원 꼭 넣기'. 전원 안넣어서 30분 삭제
+
+
+9. id지정했으면 캘리브레이션 
+lerobot-calibrate \
+    --robot.type=so101_follower \
+    --robot.port=/dev/tty.usbmodem58760431551 \ # <- The port of your robot
+    --robot.id=my_awesome_follower_arm # <- Give the robot a unique name
+lerobot-calibrate \
+    --teleop.type=so101_leader \
+    --teleop.port=/dev/tty.usbmodem58760431551 \ # <- The port of your robot
+    --teleop.id=my_awesome_leader_arm # <- Give the robot a unique name
+
+마찬가지로 윈도우 명령어로 써야함
+lerobot-calibrate --robot.type=so101_follower --robot.port=COM10 --robot.id=my_awesome_follower_arm
+lerobot-calibrate --teleop.type=so101_leader --teleop.port=COM9 --teleop.id=my_awesome_leader_arm
+
+
+10부터 해야함 9까지 완성
+10. 텔레오퍼레이터 실행. (경로지정 조심)
+lerobot-teleoperate \
+    --robot.type=so101_follower \
+    --robot.port=/dev/tty.usbmodem58760431541 \
+    --robot.id=my_awesome_follower_arm \
+    --teleop.type=so101_leader \
+    --teleop.port=/dev/tty.usbmodem58760431551 \
+    --teleop.id=my_awesome_leader_arm
+    
+윈도우 명령어
+lerobot-teleoperate `
+    --robot.type=so101_follower `
+    --robot.port=COM10 `
+    --robot.id=my_awesome_follower_arm `
+    --teleop.type=so101_leader `
+    --teleop.port=COM9 `
+    --teleop.id=my_awesome_leader_arm
+
+
+내 노트북기준
+리더암
+(lerobot) C:\Users\kim nh\lerobot>python -c "import serial.tools.list_ports; [print(f' 포트 발견: {p.device} ({p.description})') for p in serial.tools.list_ports.comports()]"
+포트 발견: COM9 (표준 Bluetooth에서 직렬 링크(COM9))
+포트 발견: COM14 (USB-Enhanced-SERIAL CH343(COM14))
+포트 발견: COM4 (표준 Bluetooth에서 직렬 링크(COM4))
+포트 발견: COM6 (표준 Bluetooth에서 직렬 링크(COM6))
+포트 발견: COM7 (표준 Bluetooth에서 직렬 링크(COM7))
+포트 발견: COM10 (표준 Bluetooth에서 직렬 링크(COM10))
+포트 발견: COM8 (표준 Bluetooth에서 직렬 링크(COM8))
+포트 발견: COM5 (표준 Bluetooth에서 직렬 링크(COM5))
+포트 발견: COM3 (표준 Bluetooth에서 직렬 링크(COM3))
+
+
+팔로워암
+(lerobot) C:\Users\kim nh\lerobot>python -c "import serial.tools.list_ports; [print(f' 포트 발견: {p.device} ({p.description})') for p in serial.tools.list_ports.comports()]"
+ 포트 발견: COM9 (표준 Bluetooth에서 직렬 링크(COM9))
+ 포트 발견: COM4 (표준 Bluetooth에서 직렬 링크(COM4))
+ 포트 발견: COM6 (표준 Bluetooth에서 직렬 링크(COM6))
+ 포트 발견: COM7 (표준 Bluetooth에서 직렬 링크(COM7))
+ 포트 발견: COM10 (표준 Bluetooth에서 직렬 링크(COM10))
+ 포트 발견: COM8 (표준 Bluetooth에서 직렬 링크(COM8))
+ 포트 발견: COM5 (표준 Bluetooth에서 직렬 링크(COM5))
+ 포트 발견: COM3 (표준 Bluetooth에서 직렬 링크(COM3))
+ 포트 발견: COM12 (USB-Enhanced-SERIAL CH343(COM12))
