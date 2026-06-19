@@ -192,3 +192,4 @@ outputs/
 *.h5
 *.onnx
 *.mp4
+.github/
