@@ -233,4 +233,5 @@ packetHandler.write1ByteTxRx(portHandler, TILT_ID, ADDR_TORQUE_ENABLE, TORQUE_DI
 
 portHandler.closePort()
 
+
 print("종료")
