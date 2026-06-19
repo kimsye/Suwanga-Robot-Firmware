@@ -51,6 +51,7 @@ MOTOR1 = 1 # shoulder_pan
 MOTOR2 = 2 # shoulder_lift
 MOTOR3 = 3 # elbow_flex
 
+
 # =========================
 # 3. 모터 각도 변환 (Tick 연산)
 # =========================

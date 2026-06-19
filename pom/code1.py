@@ -189,3 +189,4 @@ if __name__ == "__main__":
         packetHandler.write1ByteTxRx(m, ADDR_TORQUE_ENABLE, TORQUE_DISABLE)
     portHandler.closePort()
     print("시스템 종료")
+    
