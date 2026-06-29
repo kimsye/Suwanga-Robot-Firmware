@@ -55,6 +55,8 @@ def update_pantilt(
     global ema_ind0
     global ema_ind1
 
+    print(f"DEBUG - adc[14]:{adc[14]} adc[15]:{adc[15]} sw:{sw}")  # 여기 추가
+
     # =========================
     # SW OFF
     # =========================
@@ -79,6 +81,8 @@ def update_pantilt(
 
     ind0 = int(ema_ind0)
     ind1 = int(ema_ind1)
+    # 추가------------------
+    print(f"IND0:{ind0} IND1:{ind1}")
 
     # =========================
     # CENTER 기준값
@@ -102,17 +106,17 @@ def update_pantilt(
     # PAN (IND0)
     # =========================
     if ind0 > center + deadzone:
-        pan_pos += calc_step(ind0)
+        pan_pos -= calc_step(ind0) 
     elif ind0 < center - deadzone:
-        pan_pos -= calc_step(ind0)
+        pan_pos += calc_step(ind0)
 
     # =========================
     # TILT (IND1)
     # =========================
     if ind1 > center + deadzone:
-        tilt_pos += calc_step(ind1)
-    elif ind1 < center - deadzone:
         tilt_pos -= calc_step(ind1)
+    elif ind1 < center - deadzone:
+        tilt_pos += calc_step(ind1)
 
     # =========================
     # LIMIT
