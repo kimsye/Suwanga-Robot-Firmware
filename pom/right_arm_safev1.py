@@ -2,11 +2,16 @@ import serial
 import threading
 import time
 from scservo_sdk import *
-
-from pantilt import update_pantilt
-from pantilt import scs_write_pos
-from pantilt import pan_pos
-from pantilt import tilt_pos
+#--------------
+from pantilt_safe2 import update_pantilt
+from pantilt_safe2 import scs_write_pos
+from pantilt_safe2 import pan_pos
+from pantilt_safe2 import tilt_pos
+#-----------
+#from pantilt import update_pantilt
+#from pantilt import scs_write_pos
+#from pantilt import pan_pos
+#from pantilt import tilt_pos
 
 # =========================
 # STM32 ADC 시리얼
@@ -269,6 +274,7 @@ try:
         # =========================
         # 팬틸트 업데이트
         # =========================
+        # 팬틸트 업데이트
         update_pantilt(
             parsed,
             sw_toggle,
