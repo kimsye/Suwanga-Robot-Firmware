@@ -255,7 +255,7 @@ try:
                 GRIPPER_ADC_MIN = 2973  # 조이스틱 릴리즈 시 ADC 값
                 GRIPPER_ADC_MAX = 3993  # 조이스틱 최대 시 ADC 값
                 GRIPPER_POS_OPEN = 3935  # 그리퍼 열림 모터 위치
-                GRIPPER_POS_CLOSE = 500  # 그리퍼 닫힘 모터 위치 (낮출수록 더 닫힘)
+                GRIPPER_POS_CLOSE = 0  # 그리퍼 닫힘 모터 위치 (낮출수록 더 닫힘)
                 adc = int(ema_values[6])
                 ratio = max(
                     0.0,
