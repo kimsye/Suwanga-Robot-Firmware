@@ -32,12 +32,15 @@ TORQUE_DISABLE = 0
 # =========================
 MOTORS = [1, 2, 3, 4, 5, 6, 7]
 
+# 반전이 필요한 채널 (인덱스 기준, MOTORS[5] = 모터 ID 6)
+REVERSE_CHANNELS = [5]
+
 # =====================================================
 # 방어 파라미터
 # =====================================================
 # alpha 추가 !!!!!!!!!!!!!!!!-------
-EMA_ALPHA_ARM = [0.3, 0.3, 0.3, 0.3, 0.3, 0.3]
-EMA_ALPHA_GRIPPER = 0.3
+EMA_ALPHA_ARM = [0.5, 0.5, 0.5, 0.4, 0.5, 0.4]
+EMA_ALPHA_GRIPPER = 0.5
 
 ema_values = [None] * 7
 # alpha 추가 !!!!!!!!!!!!!!!!-------
@@ -50,7 +53,7 @@ DEAD_ZONE_EXIT = 14
 in_dead_zone = [False] * 7
 # =================================
 
-MAX_DELTA = 50
+MAX_DELTA = 70
 
 system_ready = False
 startup_count = 0
@@ -190,6 +193,8 @@ try:
 
             else:
                 tick = int(ema_values[i])
+                if i in REVERSE_CHANNELS:
+                    tick = 4095 - tick
 
             if prev_ticks[i] is not None:
                 delta = tick - prev_ticks[i]
@@ -201,10 +206,14 @@ try:
                 # =====================================================
                 # [수정] MAX_DELTA 이중 적용 버그 수정
                 # 그리퍼(i==6)는 별도 ratio 로직이라 제외하고
-                # 일반 모터만 클램프된 tick을 ema_values에 동기화
+                # 일반 모터만 클램프된 tick을 raw-space로 역변환하여
+                # ema_values에 동기화 (반전 채널 포함)
                 # =====================================================
                 if i != 6:
-                    ema_values[i] = float(tick)
+                    if i in REVERSE_CHANNELS:
+                        ema_values[i] = float(4095 - tick)
+                    else:
+                        ema_values[i] = float(tick)
 
             # =====================================================
             # [추가] 히스테리시스 Dead Zone
