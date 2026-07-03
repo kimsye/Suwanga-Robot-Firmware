@@ -66,9 +66,9 @@ REVERSE_CHANNELS = [0, 3, 4, 5, 6]  # 9, 12, 13, 14, 15번 반전
 # EMA 필터 (0에 가까울수록 부드러움, 1에 가까울수록 민감)
 # 일반 모터(채널 0~5) 개별 alpha — MOTORS[0]~MOTORS[5]에 대응
 # 초기값은 기존 0.1로 통일, 이후 채널별 실측 튜닝 예정
-EMA_ALPHA_ARM = [0.3, 0.3, 0.3, 0.4, 0.4, 0.4]
+EMA_ALPHA_ARM = [0.45, 0.45, 0.45, 0.45, 0.45, 0.5]
 # 그리퍼(채널 6) 전용 — 일반 모터와 분리 관리, 오늘은 값 변경 없음
-EMA_ALPHA_GRIPPER = 0.4
+EMA_ALPHA_GRIPPER = 0.5
 
 ema_values = [None] * 7  # 모터 7채널용
 # ---------------------
@@ -83,7 +83,7 @@ DEAD_ZONE_EXIT = 20
 in_dead_zone = [False] * 7
 
 # 변화량 제한 (1 루프당 최대 허용 변화)
-MAX_DELTA = 50
+MAX_DELTA = 70
 
 # 시작 안정화
 system_ready = False
