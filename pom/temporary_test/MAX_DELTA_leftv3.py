@@ -54,12 +54,9 @@ MAX_DELTA = 50
 
 system_ready = False
 startup_count = 0
-STARTUP_WAIT = 80  # 50 → 80 (ADC 안정화 시간 늘림)
+STARTUP_WAIT = 80
 
-# 부유 채널 감지 임계값
 FLOATING_THRESHOLD = 4080
-
-# =====================================================
 
 
 # =========================
