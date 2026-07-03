@@ -15,12 +15,6 @@ from pantilt_safe2 import tilt_pos
 # from pantilt import pan_pos
 # from pantilt import tilt_pos
 
-# ==============================
-# =====FSM=====================
-# 시작 안정화
-system_ready = False
-startup_count = 0
-STARTUP_WAIT = 50  # 약 1초
 # =====================================================
 # [추가] FSM 상태 정의
 # IDLE  : 전 채널 정지 상태, 모터 명령 안 보냄
@@ -46,9 +40,6 @@ def check_anomaly(parsed, ema_values, prev_ticks):
     현재는 항상 False 리턴 → ERROR 진입 안 함 (골격만 존재)
     """
     return False
-
-
-# ==========================
 
 
 # =========================
@@ -101,10 +92,9 @@ REVERSE_CHANNELS = [0, 3, 4, 5, 6]  # 9, 12, 13, 14, 15번 반전
 # ---------------alpha 코드 추가---------
 # EMA 필터 (0에 가까울수록 부드러움, 1에 가까울수록 민감)
 # 일반 모터(채널 0~5) 개별 alpha — MOTORS[0]~MOTORS[5]에 대응
-# 초기값은 기존 0.1로 통일, 이후 채널별 실측 튜닝 예정
-EMA_ALPHA_ARM = [0.1, 0.1, 0.1, 0.1, 0.1, 0.1]
-# 그리퍼(채널 6) 전용 — 일반 모터와 분리 관리, 오늘은 값 변경 없음
-EMA_ALPHA_GRIPPER = 0.1
+EMA_ALPHA_ARM = [0.45, 0.45, 0.45, 0.45, 0.45, 0.5]
+# 그리퍼(채널 6) 전용 — 일반 모터와 분리 관리
+EMA_ALPHA_GRIPPER = 0.5
 
 ema_values = [None] * 7  # 모터 7채널용
 # ---------------------
@@ -119,7 +109,7 @@ DEAD_ZONE_EXIT = 20
 in_dead_zone = [False] * 7
 
 # 변화량 제한 (1 루프당 최대 허용 변화)
-MAX_DELTA = 50
+MAX_DELTA = 70
 
 # 시작 안정화
 system_ready = False
@@ -247,12 +237,18 @@ prev_ticks = [None] * 7
 try:
 
     while True:
+
+        # =====================================================
+        # [추가] 시작 안정화 대기
+        # ADC 스레드가 실제 값을 받기 전에 모터 명령 차단
+        # =====================================================
         if not system_ready:
             startup_count += 1
             if startup_count >= STARTUP_WAIT and any(
                 parsed[i + 7] > 0 for i in range(7)
             ):
                 system_ready = True
+                # EMA 초기값을 현재 값으로 설정 (급발진 방지)
                 for i in range(7):
                     ema_values[i] = float(parsed[i + 7])
                 print(">>> 시스템 준비 완료, 모터 제어 시작")
@@ -260,18 +256,28 @@ try:
                 time.sleep(0.02)
                 continue
 
-        # ↓ 여기부터는 while 루프 레벨 (if not system_ready와 같은 들여쓰기)
+        # =====================================================
+        # [추가] FSM: ERROR 판단 (최우선 체크)
+        # 이상 감지 시 즉시 ERROR 진입, 이번 루프 모터 명령 스킵
+        # =====================================================
         if check_anomaly(parsed, ema_values, prev_ticks):
             current_state = STATE_ERROR
 
         if current_state == STATE_ERROR:
+            # TODO: 다음 단계에서 안전 정지/복구 절차 정의
             print(">>> ERROR 상태 — 모터 명령 차단")
             time.sleep(0.02)
             continue
 
+        # =====================================================
+        # [추가] FSM: IDLE ↔ MOVE 판단
+        # 전 채널이 Dead Zone 안이면 정지 카운트 증가 → IDLE
+        # 한 채널이라도 벗어나면 즉시 MOVE
+        # =====================================================
         all_channels_idle = all(
             prev_ticks[i] is None or in_dead_zone[i] for i in range(7)
         )
+
         if all_channels_idle:
             idle_confirm_count += 1
             if idle_confirm_count >= IDLE_CONFIRM_LOOPS:
@@ -280,18 +286,28 @@ try:
             idle_confirm_count = 0
             current_state = STATE_MOVE
 
+        # =========================
+        # 모터 9~15
+        # parsed[7]~[13] → 모터 제어용
+        # ADC → EMA → 변화량 제한 → Dead Zone → 모터
+        # 알파 변경---부분
+        # =========================
         for i in range(7):
             m = MOTORS[i]
             raw = parsed[i + 7]
 
+            # 채널별 alpha 선택 (그리퍼만 별도 상수 사용)
             alpha = EMA_ALPHA_GRIPPER if i == 6 else EMA_ALPHA_ARM[i]
 
+            # EMA 필터
             if ema_values[i] is None:
                 ema_values[i] = float(raw)
             else:
                 ema_values[i] = alpha * raw + (1 - alpha) * ema_values[i]
-
+            # -----------------그리퍼 로직 분리------------------
             if i == 6:
+                # ── 그리퍼(15번) 전용 처리 ──────────────────────────────
+                # adc_monitor.py 로 실측 후 아래 두 값을 수정하세요
                 GRIPPER_ADC_MIN = 2973  # 조이스틱 릴리즈 시 ADC 값
                 GRIPPER_ADC_MAX = 3993  # 조이스틱 최대 시 ADC 값
                 GRIPPER_POS_OPEN = 3935  # 그리퍼 열림 모터 위치
@@ -304,14 +320,19 @@ try:
                         (adc - GRIPPER_ADC_MIN) / (GRIPPER_ADC_MAX - GRIPPER_ADC_MIN),
                     ),
                 )
+                # 반전 (닫힘→열림)
                 tick = int(
                     GRIPPER_POS_CLOSE + ratio * (GRIPPER_POS_OPEN - GRIPPER_POS_CLOSE)
-                )
+                )  # 반전
+
             else:
+                # ── 일반 모터 처리 ───────────────────────────────────────
                 tick = int(ema_values[i])
                 if i in REVERSE_CHANNELS:
                     tick = 4095 - tick
 
+            # ---------------------------------------------------
+            # MAX_DELTA (매핑 후 적용 → prev_ticks와 같은 스케일)
             if prev_ticks[i] is not None:
                 delta = tick - prev_ticks[i]
                 if delta > MAX_DELTA:
@@ -319,12 +340,19 @@ try:
                 elif delta < -MAX_DELTA:
                     tick = prev_ticks[i] - MAX_DELTA
 
+                # =====================================================
+                # [수정] MAX_DELTA 이중 적용 버그 수정
+                # 클램프된 tick을 ema_values에 되돌려 써서
+                # 필터 내부 상태 == 실제 명령된 값 이 되도록 동기화.
+                # (그리퍼 i==6은 별도 ratio 로직이라 제외)
+                # =====================================================
                 if i != 6:
                     if i in REVERSE_CHANNELS:
-                        ema_values[i] = float(4095 - tick)
+                        ema_values[i] = float(4095 - tick)  # raw-space로 역변환 후 저장
                     else:
                         ema_values[i] = float(tick)
 
+                # 히스테리시스 Dead Zone
                 diff = abs(tick - prev_ticks[i])
                 if in_dead_zone[i]:
                     if diff <= DEAD_ZONE_EXIT:
@@ -337,18 +365,29 @@ try:
                         continue
 
             packetHandler.write2ByteTxRx(portHandler, m, ADDR_GOAL_POSITION, tick)
+
             prev_ticks[i] = tick
 
+        # =========================
+        # 팬틸트 업데이트
+        # =========================
         update_pantilt(parsed, sw_toggle, packetHandler, portHandler, PAN_ID, TILT_ID)
 
+        # =========================
+        # 출력
+        # =========================
         print("\033[F", end="")
+
+        # [변경] raw vs filtered 비교 출력
         raw_str = " ".join([f"{parsed[i+7]:5d}" for i in range(7)])
         flt_str = " ".join([f"{int(v) if v else 0:5d}" for v in ema_values])
+
         print(
             f"RAW:{raw_str} | FLT:{flt_str}"
             + f" SW:{sw_toggle}"
             + f" PAN:{pan_pos:4d}"
             + f" TILT:{tilt_pos:4d}"
+            + f" STATE:{current_state}"
         )
 
         time.sleep(0.02)
