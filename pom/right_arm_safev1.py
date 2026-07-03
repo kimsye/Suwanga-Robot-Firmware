@@ -7,6 +7,8 @@ from pantilt_safe2 import update_pantilt
 from pantilt_safe2 import scs_write_pos
 from pantilt_safe2 import pan_pos
 from pantilt_safe2 import tilt_pos
+
+
 #-----------
 #from pantilt import update_pantilt
 #from pantilt import scs_write_pos
@@ -62,11 +64,11 @@ REVERSE_CHANNELS = [0, 3, 4, 5, 6]  # 9, 12, 13, 14, 15번 반전
 # =====================================================
 
 # EMA 필터 (0에 가까울수록 부드러움, 1에 가까울수록 민감)
-EMA_ALPHA = 0.3
+EMA_ALPHA = 0.1
 ema_values = [None] * 7  # 모터 7채널용
 
 # Dead Zone (이 이하의 변화는 무시)
-DEAD_ZONE = 5
+DEAD_ZONE = 12
 
 # 변화량 제한 (1 루프당 최대 허용 변화)
 MAX_DELTA = 50
@@ -226,39 +228,41 @@ try:
             m = MOTORS[i]
             raw = parsed[i + 7]
 
-            # [추가] EMA 필터
+            # EMA 필터
             if ema_values[i] is None:
                 ema_values[i] = float(raw)
             else:
                 ema_values[i] = EMA_ALPHA * raw + (1 - EMA_ALPHA) * ema_values[i]
 
-            tick = int(ema_values[i])
+#-----------------그리퍼 로직 분리------------------
+            if i == 6:
+                # ── 그리퍼(15번) 전용 처리 ──────────────────────────────
+                # adc_monitor.py 로 실측 후 아래 두 값을 수정하세요
+                GRIPPER_ADC_MIN  = 2973   # 조이스틱 릴리즈 시 ADC 값
+                GRIPPER_ADC_MAX  = 3993   # 조이스틱 최대 시 ADC 값
+                GRIPPER_POS_OPEN  = 3935  # 그리퍼 열림 모터 위치
+                GRIPPER_POS_CLOSE = 500   # 그리퍼 닫힘 모터 위치 (낮출수록 더 닫힘)
+                adc = int(ema_values[6])
+                ratio = max(0.0, min(1.0, (adc - GRIPPER_ADC_MIN) / (GRIPPER_ADC_MAX - GRIPPER_ADC_MIN)))
+                # 반전 (닫힘→열림)
+                tick = int(GRIPPER_POS_CLOSE + ratio * (GRIPPER_POS_OPEN - GRIPPER_POS_CLOSE))  # 반전
 
-            # [추가] 변화량 제한 (급발진 방지)
+            else:
+                # ── 일반 모터 처리 ───────────────────────────────────────
+                tick = int(ema_values[i])
+                if i in REVERSE_CHANNELS:
+                    tick = 4095 - tick
+
+#---------------------------------------------------
+            # MAX_DELTA (매핑 후 적용 → prev_ticks와 같은 스케일)
             if prev_ticks[i] is not None:
                 delta = tick - prev_ticks[i]
                 if delta > MAX_DELTA:
                     tick = prev_ticks[i] + MAX_DELTA
                 elif delta < -MAX_DELTA:
                     tick = prev_ticks[i] - MAX_DELTA
-                    
-            #-----------------
-            tick = int(ema_values[i])
 
-            # 반전 먼저
-            if i in REVERSE_CHANNELS:
-                tick = 4095 - tick
-
-            # 그 다음 MAX_DELTA
-            if prev_ticks[i] is not None:
-                delta = tick - prev_ticks[i]
-                if delta > MAX_DELTA:
-                    tick = prev_ticks[i] + MAX_DELTA
-                elif delta < -MAX_DELTA:
-                    tick = prev_ticks[i] - MAX_DELTA
-            #----------------------
-            
-            # [추가] Dead Zone (미세 변화 무시)
+            # Dead Zone
             if prev_ticks[i] is not None and abs(tick - prev_ticks[i]) <= DEAD_ZONE:
                 continue
             
