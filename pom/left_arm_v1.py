@@ -9,12 +9,8 @@ from scservo_sdk import *
 PORT_ADC = "COM13"
 BAUD_ADC = 115200
 
-# 원본 STM32 데이터 저장용
 adc_raw = [0] * 22
-
-# 실제 사용할 ADC 데이터
 parsed = [0] * 16
-
 running = True
 
 # =========================
@@ -36,37 +32,27 @@ TORQUE_DISABLE = 0
 # =========================
 MOTORS = [1, 2, 3, 4, 5, 6, 7]
 
-# =====================================================
-# 방어 파라미터
-# =====================================================
-
-EMA_ALPHA = 0.3
+# =========================
+# 방어 파라미터 (오른팔과 동일 구조)
+# =========================
+EMA_ALPHA = 0.1
 ema_values = [None] * 7
 
-DEAD_ZONE = 7
+DEAD_ZONE = 12
 MAX_DELTA = 50
 
 system_ready = False
 startup_count = 0
-STARTUP_WAIT = 80  # 50 → 80 (ADC 안정화 시간 늘림)
+STARTUP_WAIT = 80
 
-# 모터별 위치 한계 (EEPROM 설정과 일치)
-MOTOR_LIMITS = {7: (935, 1055)}
-
-# 부유 채널 감지 임계값
 FLOATING_THRESHOLD = 4080
-
-# =====================================================
 
 
 # =========================
 # ADC 스레드
 # =========================
 def read_serial_adc():
-
-    global adc_raw
-    global parsed
-    global running
+    global adc_raw, parsed, running
 
     try:
         ser = serial.Serial(PORT_ADC, BAUD_ADC, timeout=1)
@@ -140,13 +126,10 @@ try:
 
         if not system_ready:
             startup_count += 1
-            if startup_count >= STARTUP_WAIT and any(
-                0 < parsed[i] < FLOATING_THRESHOLD for i in range(7)
-            ):
+            if startup_count >= STARTUP_WAIT and any(parsed[i] > 0 for i in range(7)):
                 system_ready = True
                 for i in range(7):
-                    if parsed[i] < FLOATING_THRESHOLD:
-                        ema_values[i] = float(parsed[i])
+                    ema_values[i] = float(parsed[i])
                 print(">>> 시스템 준비 완료, 모터 제어 시작")
             else:
                 time.sleep(0.02)
@@ -154,28 +137,27 @@ try:
 
         # =========================
         # 왼팔 모터 1~7
-        # parsed[0]~[6] → 모터 제어용
         # =========================
         for i in range(7):
 
             m = MOTORS[i]
-            raw = parsed[i]  # 오른팔과 다르게 i+7 아님
+            raw = parsed[i]
 
-            # 부유 채널 감지 (ADC 미연결 시 4095로 튐)
             if raw >= FLOATING_THRESHOLD:
                 continue
 
+            # EMA 필터
             if ema_values[i] is None:
                 ema_values[i] = float(raw)
             else:
                 ema_values[i] = EMA_ALPHA * raw + (1 - EMA_ALPHA) * ema_values[i]
 
             if i == 6:
-                # 그리퍼(7번) 전용 처리 - adc_monitor.py로 실측 후 아래 값 수정
-                GRIPPER_ADC_MIN = 841  # 조이스틱 릴리즈 시 ADC 값
-                GRIPPER_ADC_MAX = 1283  # 조이스틱 최대 시 ADC 값
-                GRIPPER_POS_MIN = 935  # 그리퍼 최소 위치 (EEPROM 한계)
-                GRIPPER_POS_MAX = 1055  # 그리퍼 최대 위치 (EEPROM 한계)
+                # ── 그리퍼(7번) 전용 처리 ──────────────────────────
+                GRIPPER_ADC_MIN = 145  # 완전히 쥐었을 때 ADC (실측)
+                GRIPPER_ADC_MAX = 1270  # 완전히 놓았을 때 ADC (실측)
+                GRIPPER_POS_OPEN = 4100  # 그리퍼 열림 모터 위치
+                GRIPPER_POS_CLOSE = 500  # 그리퍼 닫힘 모터 위치 (낮출수록 더 닫힘)
                 adc = int(ema_values[6])
                 ratio = max(
                     0.0,
@@ -185,12 +167,13 @@ try:
                     ),
                 )
                 tick = int(
-                    GRIPPER_POS_MIN + ratio * (GRIPPER_POS_MAX - GRIPPER_POS_MIN)
+                    GRIPPER_POS_CLOSE + ratio * (GRIPPER_POS_OPEN - GRIPPER_POS_CLOSE)
                 )
 
             else:
                 tick = int(ema_values[i])
 
+            # MAX_DELTA
             if prev_ticks[i] is not None:
                 delta = tick - prev_ticks[i]
                 if delta > MAX_DELTA:
@@ -198,18 +181,16 @@ try:
                 elif delta < -MAX_DELTA:
                     tick = prev_ticks[i] - MAX_DELTA
 
-            # MOTOR_LIMITS 클램프 (MAX_DELTA 후 강제 범위 적용)
-            if m in MOTOR_LIMITS:
-                lo, hi = MOTOR_LIMITS[m]
-                tick = max(lo, min(hi, tick))
-
+            # Dead Zone
             if prev_ticks[i] is not None and abs(tick - prev_ticks[i]) <= DEAD_ZONE:
                 continue
 
             packetHandler.write2ByteTxRx(portHandler, m, ADDR_GOAL_POSITION, tick)
-
             prev_ticks[i] = tick
 
+        # =========================
+        # 출력
+        # =========================
         # =========================
         # 출력
         # =========================
@@ -218,9 +199,10 @@ try:
         raw_str = " ".join([f"{parsed[i]:5d}" for i in range(7)])
         flt_str = " ".join([f"{int(v) if v else 0:5d}" for v in ema_values])
 
-        print(f"RAW:{raw_str} | FLT:{flt_str}")
-
-        time.sleep(0.02)
+        print(
+            f"RAW:{raw_str} | FLT:{flt_str}"
+            + f" GRIPPER:{prev_ticks[6] if prev_ticks[6] is not None else 0:4d}"
+        )
 
 except KeyboardInterrupt:
     pass
