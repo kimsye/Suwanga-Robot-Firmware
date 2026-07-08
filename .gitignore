@@ -193,3 +193,13 @@ outputs/
 *.onnx
 *.mp4
 .github/
+# STM32 firmware build outputs
+firmware/Debug/
+firmware/Release/
+firmware/.metadata/
+*.o
+*.d
+*.elf
+*.bin
+*.map
+*.list
