@@ -1,6 +1,7 @@
 import serial
 import threading
 import time
+import struct  # CRC
 from scservo_sdk import *
 from pantilt_safe2 import update_pantilt
 from pantilt_safe2 import scs_write_pos
@@ -41,7 +42,6 @@ anomaly_count_right = [0] * 7
 # =====================================================
 # [추가] CRC-16 CCITT (직접 구현)
 # 다항식: 0x1021, 초기값: 0xFFFF (CCITT-FALSE 변형)
-# 현재는 STM32가 CRC 필드를 안 보내므로 실전 데이터 검증엔 미사용.
 # 함수 정확성 확인용 자체 테스트 벡터만 아래 self_test로 검증.
 # =====================================================
 def calc_crc16_ccitt(data: bytes, initial=0xFFFF) -> int:
@@ -71,10 +71,9 @@ def crc16_self_test():
 
 
 # =====================================================
-# [추가] 시퀀스 넘버 검증
-# 지금은 STM32가 시퀀스 필드를 안 보내므로 실전 연동 전이지만,
-# 나중에 패킷에 seq 필드가 생기면 check(seq) 호출만 하면 되는 구조로 미리 준비.
-# =====================================================
+# 시퀀스 넘버 검증
+
+
 class SequenceValidator:
     def __init__(self, max_seq=65535):
         self.last_seq = None
@@ -116,6 +115,17 @@ class SequenceValidator:
         # expected보다 seq가 앞서 있으면(순환 고려) 중간 패킷이 유실된 것
         diff = (seq - expected) % (self.max_seq + 1)
         return diff < (self.max_seq // 2)
+
+
+# =====================================================
+# =====================================================
+# [추가] 실전 시퀀스 검증기 인스턴스 (Step2)
+# =====================================================
+PACKET_HEADER = b"\xaa\x55"
+PACKET_SIZE = 49
+PACKET_STRUCT = struct.Struct("<2sBH16H4HBBH")
+
+seq_checker = SequenceValidator()
 
 
 def sequence_validator_self_test():
@@ -213,6 +223,8 @@ SERIAL_TIMEOUT_SEC = 0.5  # 이 시간 이상 새 데이터 없으면 통신 두
 last_serial_rx_time = time.time()
 
 # =========================================
+# CRC 펌웨어 전환으로 바꾼 코드
+# ==========================================
 
 
 def read_serial_adc():
@@ -224,41 +236,112 @@ def read_serial_adc():
         print("시리얼 열기 실패:", e)
         return
 
+    buf = bytearray()  # [추가] 수신된 바이트를 계속 쌓아두는 버퍼
+
     while running:
         try:
-            line = ser.readline().decode(errors="ignore")
-            line = line.replace("\x00", "").strip()
-
-            if not line:
+            chunk = ser.read(ser.in_waiting or 1)
+            if not chunk:
                 continue
+            buf.extend(chunk)
 
-            parts = line.split(",")
+            while True:
+                idx = buf.find(PACKET_HEADER)
 
-            if len(parts) < 22:
-                continue
+                if idx == -1:
+                    if len(buf) > 1:
+                        del buf[:-1]
+                    break
 
-            for i in range(min(22, len(parts))):
-                val_str = "".join(filter(str.isdigit, parts[i]))
-                if val_str != "":
-                    adc_raw[i] = int(val_str)
+                if idx > 0:
+                    del buf[:idx]
 
-            # 왼팔: MUX C1~C7 → parsed[0]~[6]
-            for i in range(7):
-                parsed[i] = adc_raw[i + 1]
+                if len(buf) < PACKET_SIZE:
+                    break
 
-            # 오른팔: MUX C9~C15 → parsed[7]~[13]
-            for i in range(7):
-                parsed[i + 7] = adc_raw[i + 9]
+                raw_packet = bytes(buf[:PACKET_SIZE])
 
-            # IND ADC
-            parsed[14] = adc_raw[16]
-            parsed[15] = adc_raw[17]
+                (
+                    header,
+                    msg_type,
+                    seq_num,
+                    mux0,
+                    mux1,
+                    mux2,
+                    mux3,
+                    mux4,
+                    mux5,
+                    mux6,
+                    mux7,
+                    mux8,
+                    mux9,
+                    mux10,
+                    mux11,
+                    mux12,
+                    mux13,
+                    mux14,
+                    mux15,
+                    ind0,
+                    ind1,
+                    ind2,
+                    ind3,
+                    sw0,
+                    sw1,
+                    crc_received,
+                ) = PACKET_STRUCT.unpack(raw_packet)
 
-            # SW (디지털)
-            sw_toggle = adc_raw[20]
+                crc_calc = calc_crc16_ccitt(raw_packet[: PACKET_SIZE - 2])
 
-            # [추가] 정상 파싱 성공 시점 기록
-            last_serial_rx_time = time.time()
+                if crc_calc != crc_received:
+                    print(
+                        f">>> [CRC 오류] seq={seq_num} 계산=0x{crc_calc:04X} 수신=0x{crc_received:04X} → 패킷 폐기"
+                    )
+                    del buf[:2]
+                    continue
+
+                seq_result = seq_checker.check(seq_num)
+                if seq_result != "OK":
+                    print(f">>> [시퀀스] seq={seq_num} → {seq_result}")
+
+                mux_adc_vals = [
+                    mux0,
+                    mux1,
+                    mux2,
+                    mux3,
+                    mux4,
+                    mux5,
+                    mux6,
+                    mux7,
+                    mux8,
+                    mux9,
+                    mux10,
+                    mux11,
+                    mux12,
+                    mux13,
+                    mux14,
+                    mux15,
+                ]
+
+                for i in range(16):
+                    adc_raw[i] = mux_adc_vals[i]
+                adc_raw[16] = ind0
+                adc_raw[17] = ind1
+                adc_raw[18] = ind2
+                adc_raw[19] = ind3
+                adc_raw[20] = sw0
+                adc_raw[21] = sw1
+
+                for i in range(7):
+                    parsed[i] = adc_raw[i + 1]
+                for i in range(7):
+                    parsed[i + 7] = adc_raw[i + 9]
+                parsed[14] = adc_raw[16]
+                parsed[15] = adc_raw[17]
+                sw_toggle = adc_raw[20]
+
+                last_serial_rx_time = time.time()
+
+                del buf[:PACKET_SIZE]
 
         except Exception as e:
             print("ERR:", e)
